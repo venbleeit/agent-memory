@@ -137,6 +137,7 @@ class WriteConfig:
     event_lane: bool = True
     max_rounds: int = 3
     tool_result_chars: int = 4000
+    windows_mount_root: str = "/mnt"
 
 
 @dataclasses.dataclass

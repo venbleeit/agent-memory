@@ -9,6 +9,7 @@ from agent_memory.core.errors import FieldError, ValidationError
 from agent_memory.core.store import Store
 
 from . import doctor, moments, openrouter, setup
+from .windows_bridge import WindowsBridge
 
 
 def run(
@@ -20,6 +21,7 @@ def run(
     model: str | None = None,
     mcp: bool = False,
     live: bool = True,
+    bridge: WindowsBridge | None = None,
 ) -> dict[str, object]:
     """Detect -> validate -> Store -> merge -> hooks/skill/MCP -> provider -> preflight."""
     host = setup.canonical_host(host)
@@ -44,6 +46,7 @@ def run(
             provider=provider,
             model=model,
             mcp=mcp,
+            bridge=bridge,
         )
     except ValidationError as error:
         mcp_failed = any(item.field == "mcp" for item in error.errors)
@@ -84,6 +87,7 @@ def run(
         model=model,
         mcp=mcp,
         live=live,
+        bridge=bridge,
     )
     if seeded_manage and report.status != doctor.READY:
         store.config.executor.manage = OperationExecutorConfig()

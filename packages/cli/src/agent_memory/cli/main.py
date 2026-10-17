@@ -8,6 +8,7 @@ import json
 import pathlib
 import sys
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from agent_memory.core import context as context_module
 from agent_memory.core import distill as distill_module
@@ -23,6 +24,9 @@ from agent_memory.core.recall import Recall
 from agent_memory.core.store import LEVEL_FULL, LEVELS, Store
 from agent_memory.core.watermark import Watermark
 from agent_memory.executor import distiller, selection
+
+if TYPE_CHECKING:
+    from agent_memory.adapters.windows_bridge import WindowsBridge
 
 SESSION_FLAG = "--session"
 REASON_HOST = REASONER_HOST
@@ -311,6 +315,11 @@ def _parser() -> argparse.ArgumentParser:
     installer.add_argument(
         "--no-live", action="store_true", help="skip live reasoner checks (never reports READY)"
     )
+    installer.add_argument(
+        "--windows",
+        action="store_true",
+        help="from WSL: configure the Windows Claude Code install to reach this one",
+    )
     installer.set_defaults(handler=_setup)
 
     doctor = subparsers.add_parser("doctor", help="diagnose host, Store and provider setup")
@@ -321,6 +330,11 @@ def _parser() -> argparse.ArgumentParser:
     doctor.add_argument("--mcp", action="store_true", help="require the stdio MCP server")
     doctor.add_argument(
         "--no-live", action="store_true", help="skip live reasoner checks (never reports READY)"
+    )
+    doctor.add_argument(
+        "--windows",
+        action="store_true",
+        help="from WSL: configure the Windows Claude Code install to reach this one",
     )
     doctor.set_defaults(handler=_doctor)
 
@@ -713,7 +727,9 @@ def _setup(store: Store, args: argparse.Namespace) -> dict[str, object]:
     from agent_memory.adapters import setup as setup_module
 
     hosts = [setup_module.canonical_host(args.host)] if args.host else setup_module.detect()
-    settings = pathlib.Path(args.settings) if args.settings else None
+    bridge, settings = _windows_target(store, args)
+    if bridge is not None:
+        hosts = [_bridged_host(hosts)]
     if not hosts:
         raise ValidationError([FieldError("host", "no host detected; pass --host")])
     reports = {
@@ -725,6 +741,7 @@ def _setup(store: Store, args: argparse.Namespace) -> dict[str, object]:
             model=args.model,
             mcp=args.mcp,
             live=not args.no_live,
+            bridge=bridge,
         )
         for host in hosts
     }
@@ -738,15 +755,40 @@ def _setup(store: Store, args: argparse.Namespace) -> dict[str, object]:
 def _doctor(store: Store, args: argparse.Namespace) -> dict[str, object]:
     from agent_memory.adapters import doctor
 
+    bridge, settings = _windows_target(store, args)
+    host = _bridged_host([args.host]) if bridge is not None else args.host
     return doctor.run(
         store,
-        args.host,
-        settings_path=pathlib.Path(args.settings) if args.settings else None,
+        host,
+        settings_path=settings,
         provider=args.provider,
         model=args.model,
         mcp=args.mcp,
         live=not args.no_live,
+        bridge=bridge,
     ).as_dict()
+
+
+def _windows_target(
+    store: Store, args: argparse.Namespace
+) -> tuple[WindowsBridge | None, pathlib.Path | None]:
+    from agent_memory.adapters import windows_bridge
+
+    settings = pathlib.Path(args.settings) if args.settings else None
+    if not args.windows:
+        return None, settings
+    bridge = windows_bridge.detect()
+    return bridge, settings or windows_bridge.windows_settings_path(store.config)
+
+
+def _bridged_host(hosts: list[str]) -> str:
+    from agent_memory.adapters import moments
+
+    if hosts != [moments.HOST_CLAUDE_CODE]:
+        raise ValidationError(
+            [FieldError("windows", "the Windows bridge supports --host claude-code")]
+        )
+    return moments.HOST_CLAUDE_CODE
 
 
 def _body(inline: str, from_file: str | None) -> str:

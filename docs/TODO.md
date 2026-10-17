@@ -49,6 +49,17 @@
 - Verify the Codex lifecycle hooks end to end, including the one-time hook trust review; the
   Codex Write executor is verified live, the hooks by unit tests only.
 
+## Cross-OS, subagent and redaction follow-ups
+
+- Extend the Windows bridge to Codex on Windows; setup refuses `--windows` for any host but
+  Claude Code today.
+- Decide a human-run purge for secrets that `mem scan-secrets` reports in material archived
+  before redaction existed; scanning is read-only.
+- A hook payload that is not valid JSON is dropped without a log line, because the Store is
+  unknown until the payload is parsed; log it to a fixed per-user location.
+- Run the live write and manage preflight through the Windows bridge with the host reasoner;
+  the bridge was verified end to end with distillation switched off.
+
 ## Muse Code follow-ups
 
 - Muse Code 1.4.9 passed the OpenRouter/pproxy native Write matrix on 2026-10-16: New,

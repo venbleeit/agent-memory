@@ -27,7 +27,7 @@ from agent_memory.core.config import (
 from agent_memory.core.store import Store
 
 from . import capture as capture_module
-from . import moments, muse_session, subagent, transcript
+from . import moments, muse_session, subagent, transcript, windows_bridge
 
 EXIT_OK = 0
 LOG_FILENAME = "hooks.log"
@@ -74,6 +74,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.add_argument(STORE_FLAG, default="")
         parser.add_argument(MUSE_DATA_HOME_FLAG, default="")
         parser.add_argument(MUSE_SETTINGS_FLAG, default="")
+        parser.add_argument(windows_bridge.PATH_DIALECT_FLAG, default="")
         args = parser.parse_args(argv or ())
         event = normalize_event(json.loads(sys.stdin.read() or "{}"), args.host)
         if args.store:
@@ -89,6 +90,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             agent=str(event.get("agent") or "hook"),
         )
         _arm(store.config.write.hook_timeout_seconds)
+        if args.path_dialect == windows_bridge.DIALECT:
+            event = windows_bridge.translate_event(event, store.config)
         response = handle(store, event)
         if any(key in response for key in PRINTED_KEYS):
             print(json.dumps(response))

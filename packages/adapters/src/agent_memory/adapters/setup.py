@@ -10,11 +10,15 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from typing import TYPE_CHECKING
 
 from agent_memory.core import prompts
 from agent_memory.core.errors import FieldError, ValidationError
 
 from . import moments
+
+if TYPE_CHECKING:
+    from .windows_bridge import WindowsBridge
 
 HOOK_COMMAND = "mem-hook"
 HOST_FLAG = "--host"
@@ -103,6 +107,7 @@ def install(
     provider: str | None = None,
     model: str | None = None,
     mcp: bool = False,
+    bridge: WindowsBridge | None = None,
 ) -> pathlib.Path:
     host = canonical_host(host)
     target = settings_path or default_settings_path(host)
@@ -115,18 +120,13 @@ def install(
 
             openrouter.merge_routing(settings, provider=provider, model=model)
         if mcp:
-            _merge_json_mcp(settings, host, store_root)
+            _merge_json_mcp(settings, host, store_root, bridge)
     hooks = settings.setdefault(HOOKS_KEY, {})
     if not isinstance(hooks, dict):
         raise ValidationError([FieldError("settings.hooks", "must be an object")])
     entry = {
         MATCHER_KEY: ANY_MATCHER,
-        HOOKS_KEY: [
-            {
-                "type": "command",
-                "command": hook_command(host, store_root, settings_path=target),
-            }
-        ],
+        HOOKS_KEY: [hook_spec(host, store_root, settings_path=target, bridge=bridge)],
     }
     for event in moments.DIALECTS[host]:
         entries = hooks.get(event, [])
@@ -137,10 +137,33 @@ def install(
     rendered = json.dumps(settings, indent=SETTINGS_INDENT, sort_keys=True) + "\n"
     if not target.exists() or target.read_text(encoding="utf-8") != rendered:
         _atomic_write(target, rendered)
-    _install_skill(target.parent / SKILL_PATH)
+    _install_skill(target.parent / SKILL_PATH, skill_text(store_root, bridge))
     if mcp and host != moments.HOST_MUSE_CODE:
-        _install_external_mcp(host, target, store_root)
+        _install_external_mcp(host, target, store_root, bridge)
     return target
+
+
+def hook_spec(
+    host: str,
+    store_root: pathlib.Path | None = None,
+    *,
+    settings_path: pathlib.Path | None = None,
+    bridge: WindowsBridge | None = None,
+) -> dict[str, object]:
+    """A bridged hook is exec form, so no Windows shell ever parses its arguments."""
+    command = hook_command(host, store_root, settings_path=settings_path)
+    if bridge is None:
+        return {"type": "command", "command": command}
+    from .windows_bridge import DIALECT, PATH_DIALECT_FLAG
+
+    launcher, *arguments = bridge.wrap([*shlex.split(command), PATH_DIALECT_FLAG, DIALECT])
+    return {"type": "command", "command": launcher, "args": arguments}
+
+
+def skill_text(store_root: pathlib.Path | None, bridge: WindowsBridge | None) -> str:
+    if bridge is None or store_root is None:
+        return prompts.skill()
+    return prompts.skill(bridge.invocation(store_root))
 
 
 def hook_command(
@@ -171,7 +194,10 @@ def mcp_binary() -> str:
 
 
 def _merge_json_mcp(
-    settings: dict[str, object], host: str, store_root: pathlib.Path | None
+    settings: dict[str, object],
+    host: str,
+    store_root: pathlib.Path | None,
+    bridge: WindowsBridge | None = None,
 ) -> None:
     key = "mcp_servers" if host == moments.HOST_MUSE_CODE else "mcpServers"
     servers = settings.setdefault(key, {})
@@ -186,6 +212,12 @@ def _merge_json_mcp(
         expected["mode"] = "optional"
     if store_root is not None:
         expected["env"] = {"AGENT_MEMORY_STORE": str(pathlib.Path(store_root).resolve())}
+    if bridge is not None:
+        environment = expected.pop("env", {})
+        pairs = environment.items() if isinstance(environment, dict) else ()
+        assignments = [f"{key}={value}" for key, value in pairs]
+        launcher, *arguments = bridge.wrap(["env", *assignments, mcp_binary()])
+        expected.update({"command": launcher, "args": arguments})
     existing = servers.get(MCP_SERVER)
     if existing is not None and existing != expected:
         raise ValidationError(
@@ -195,13 +227,16 @@ def _merge_json_mcp(
 
 
 def _install_external_mcp(
-    host: str, target: pathlib.Path, store_root: pathlib.Path | None
+    host: str,
+    target: pathlib.Path,
+    store_root: pathlib.Path | None,
+    bridge: WindowsBridge | None = None,
 ) -> None:
     if host == moments.HOST_CLAUDE_CODE:
         home = target.parent.parent
         claude_config = home / ".claude.json"
         settings = _read_settings(claude_config)
-        _merge_json_mcp(settings, host, store_root)
+        _merge_json_mcp(settings, host, store_root, bridge)
         rendered = json.dumps(settings, indent=SETTINGS_INDENT, sort_keys=True) + "\n"
         if not claude_config.exists() or claude_config.read_text(encoding="utf-8") != rendered:
             _atomic_write(claude_config, rendered)
@@ -257,9 +292,8 @@ def _muse_data_home(environment: dict[str, str] | None = None) -> pathlib.Path:
     return pathlib.Path(env.get("XDG_DATA_HOME") or fallback)
 
 
-def _install_skill(path: pathlib.Path) -> None:
+def _install_skill(path: pathlib.Path, rendered: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    rendered = prompts.skill()
     if not path.exists() or path.read_text(encoding="utf-8") != rendered:
         path.write_text(rendered, encoding="utf-8")
 

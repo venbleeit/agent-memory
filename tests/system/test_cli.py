@@ -136,6 +136,22 @@ def test_inspect_reports_the_recall_fingerprint_that_licenses_attribution(cli):
     assert payload["recall_fingerprint"] == cli("inspect")["recall_fingerprint"]
 
 
+def test_windows_setup_bridges_the_claude_code_install_through_wsl(cli, tmp_path, monkeypatch):
+    from agent_memory.adapters import setup, windows_bridge
+
+    monkeypatch.setenv(windows_bridge.DISTRO_ENV, "Ubuntu")
+    monkeypatch.setattr(setup, "probe", lambda host: f"{host} 1.0")
+    target = tmp_path / "Users" / "someone" / ".claude" / "settings.json"
+
+    cli("setup", "--host", "claude-code", "--windows", "--settings", str(target), "--no-live",
+        expect=EXIT_ERROR)
+
+    stop = json.loads(target.read_text(encoding="utf-8"))["hooks"]["Stop"]
+    assert stop[-1]["hooks"][0]["command"] == windows_bridge.LAUNCHER
+    assert windows_bridge.DIALECT in stop[-1]["hooks"][0]["args"]
+    cli("setup", "--host", "codex", "--windows", "--settings", str(target), expect=EXIT_INVALID)
+
+
 def test_scan_secrets_reports_preexisting_hits_without_values_or_changes(cli):
     token = "ghp_" + "Yv4Kp9Lm2Nq7Rs1Tu6Wx3Za8Bc5De0Fg2Hj7Kl"
     session = cli.root / "archive" / "sessions" / "legacy.jsonl"

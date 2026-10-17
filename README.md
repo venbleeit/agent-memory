@@ -194,6 +194,31 @@ Use a non-default Store in the usual way; setup pins its absolute path into ever
 AGENT_MEMORY_STORE=/absolute/path/to/store mem setup --host codex
 ```
 
+Claude Code on Windows shares the WSL install's Store through a bridge. Run this from inside WSL
+after the WSL setup above:
+
+```bash
+mem setup --host claude-code --windows --mcp
+mem doctor --host claude-code --windows --mcp
+```
+
+It finds the Windows user profile, writes exec-form hooks that call the WSL `mem-hook` through
+`wsl.exe`, and installs the skill and optional MCP entry with the same bridged command. Windows
+transcript paths are translated to their WSL mount (`write.windows_mount_root`, default `/mnt`).
+Subagent stops are captured on both sides as child sessions of the session that spawned them.
+
+### Secrets
+
+Credentials are redacted before anything is archived or written as memory: platform tokens,
+cloud keys, private-key blocks, bearer and URL credentials, signed tokens, and values assigned to
+secret-named keys. Add your own shapes under `[redaction] patterns` in the Store's
+`config.toml`. Material archived before redaction existed stays where it is; list it without
+printing any value:
+
+```bash
+mem scan-secrets
+```
+
 Run the same checks later, or get a precise failure layer after setup fails:
 
 ```bash

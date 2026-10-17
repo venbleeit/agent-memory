@@ -291,7 +291,7 @@ description: Read and write the shared long-term memory store. Use before starti
 # agent-memory
 
 A shared memory store on disk. Markdown files are the truth; `mem` is the way in and out.
-
+{invocation}
 ## Host setup
 
 Use the deterministic installer for the active host: `mem setup --host claude-code`,
@@ -365,9 +365,16 @@ Core validates paths, relationships, time intervals, and provenance under a writ
 """
 
 
-def skill() -> str:
+BRIDGED_INVOCATION = """
+On this host the mem CLI runs inside WSL. Each `mem` command below runs as
+`{invocation}` followed by the same arguments.
+"""
+
+
+def skill(invocation: str = "") -> str:
     """The skill file is rendered from here, so its discipline is the one the executor gets."""
-    return SKILL.format(discipline=WRITE_DISCIPLINE)
+    bridged = BRIDGED_INVOCATION.format(invocation=invocation) if invocation else ""
+    return SKILL.format(discipline=WRITE_DISCIPLINE, invocation=bridged)
 
 
 TOOL_RULES = """## Looking before writing
