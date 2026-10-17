@@ -136,6 +136,21 @@ def test_inspect_reports_the_recall_fingerprint_that_licenses_attribution(cli):
     assert payload["recall_fingerprint"] == cli("inspect")["recall_fingerprint"]
 
 
+def test_scan_secrets_reports_preexisting_hits_without_values_or_changes(cli):
+    token = "ghp_" + "Yv4Kp9Lm2Nq7Rs1Tu6Wx3Za8Bc5De0Fg2Hj7Kl"
+    session = cli.root / "archive" / "sessions" / "legacy.jsonl"
+    session.parent.mkdir(parents=True, exist_ok=True)
+    session.write_text(json.dumps({"index": 0, "role": "user", "text": token}) + "\n")
+    before = session.read_bytes()
+
+    payload = cli("scan-secrets")
+
+    assert [hit["kind"] for hit in payload["hits"]] == ["github-token"]
+    assert payload["hits"][0]["path"].endswith("legacy.jsonl")
+    assert token not in json.dumps(payload)
+    assert session.read_bytes() == before
+
+
 def test_rebuild_from_the_command_line_is_lossless(cli):
     cli(
         "record",

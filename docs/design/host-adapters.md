@@ -56,6 +56,17 @@ the worker; failure never falls back to another transport. On a fresh Host-backe
 successful Host setup also supplies the default Manage policy. Explicit operation policies and
 legacy endpoint configuration are preserved.
 
+A subagent stop is a boundary for a child session. The child transcript is archived as its own
+session whose identity names the parent and whose first line records the parent and agent type,
+then distilled like any session; the parent archive stays the root conversation only. Children
+of the executor's own sessions stay inert under the executor marker.
+
+A Windows host reaches the WSL install through a bridge rather than a native port, so one
+operating system serializes every writer. Setup writes exec-form hooks into the Windows
+settings that run the WSL hook binary through the WSL launcher, and renders the skill and
+optional MCP entry with the same bridged command. The hook translates Windows drive paths in
+the payload to their WSL mount before reading a transcript.
+
 `muse-code` is the canonical Muse Code identity and `muse` is only a setup alias and binary
 name. Muse lifecycle events use the existing moments, and only root-session material enters the
 archive. Muse's native memory remains independent and is never copied, synchronized, or treated

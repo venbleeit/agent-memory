@@ -12,6 +12,8 @@
   boundary and scopes a separate, proposal-only native judgement adapter.
 - [Explicit raw evidence reads](raw-evidence-reads.md) defines the boundary between
   an explicit provenance read and the default retrieval policy.
+- [Secret redaction](secret-redaction.md) defines where credentials are removed before
+  text becomes durable, and how existing hits are reported.
 - [Management operation boundaries](management-operation-boundaries.md) defines the
   correction, relationship mutation, automatic duplicate supersession, and automatic
   directory grouping contracts.

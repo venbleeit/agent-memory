@@ -15,6 +15,7 @@ import re
 from .clock import Clock
 from .errors import FieldError, NotFoundError, ValidationError
 from .paths import ARCHIVE_DIRNAME, SESSIONS_DIRNAME, StoreLayout
+from .redaction import Redactor
 
 SESSION_SUFFIX = ".jsonl"
 ASCII_SPACE = 32
@@ -115,9 +116,11 @@ def append(
     path.parent.mkdir(parents=True, exist_ok=True)
     start = count(path)
     stamp = clock.timestamp()
+    redactor = Redactor(layout.config.redaction)
     lines: list[str] = []
     for offset, item in enumerate(items):
         message = _coerce(item, start + offset, stamp)
+        message = dataclasses.replace(message, text=redactor.redact(message.text))
         if message.text:
             lines.append(json.dumps(message.as_dict(), ensure_ascii=False))
     if not lines:

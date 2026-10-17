@@ -140,6 +140,13 @@ class WriteConfig:
 
 
 @dataclasses.dataclass
+class RedactionConfig:
+    enabled: bool = True
+    patterns: list[str] = dataclasses.field(default_factory=list)
+    placeholder: str = "[REDACTED:{kind}]"
+
+
+@dataclasses.dataclass
 class OperationExecutorConfig:
     reasoner: str = ""
     host: str = ""
@@ -181,6 +188,7 @@ class Config:
     recall: RecallConfig = dataclasses.field(default_factory=RecallConfig)
     manage: ManageConfig = dataclasses.field(default_factory=ManageConfig)
     write: WriteConfig = dataclasses.field(default_factory=WriteConfig)
+    redaction: RedactionConfig = dataclasses.field(default_factory=RedactionConfig)
     executor: ExecutorConfig = dataclasses.field(default_factory=ExecutorConfig)
 
     @classmethod
@@ -200,6 +208,7 @@ class Config:
                 raise ValueError(f"unknown config section: {section_name}")
             _load_section(section, values, section_name)
         config.validate_index()
+        config.validate_redaction()
         return config
 
     def validate_index(self) -> None:
@@ -207,6 +216,23 @@ class Config:
             raise ValueError("index.vector_enabled must be a boolean")
         if not isinstance(self.index.vector_model, str) or not self.index.vector_model.strip():
             raise ValueError("index.vector_model must be a non-empty string")
+
+    def validate_redaction(self) -> None:
+        import re
+
+        if not isinstance(self.redaction.enabled, bool):
+            raise ValueError("redaction.enabled must be a boolean")
+        if "{kind}" not in str(self.redaction.placeholder):
+            raise ValueError("redaction.placeholder must contain {kind}")
+        if not isinstance(self.redaction.patterns, list):
+            raise ValueError("redaction.patterns must be a list of regular expressions")
+        for pattern in self.redaction.patterns:
+            if not isinstance(pattern, str) or not pattern:
+                raise ValueError("redaction.patterns must be non-empty strings")
+            try:
+                re.compile(pattern)
+            except re.error as error:
+                raise ValueError(f"redaction.patterns has an invalid pattern: {error}") from error
 
     def save(self, store_root: pathlib.Path) -> pathlib.Path:
         path = pathlib.Path(store_root) / CONFIG_FILENAME
@@ -256,7 +282,7 @@ def _render_value(value: object) -> str:
         return "[" + ", ".join(_render_value(item) for item in value) + "]"
     if isinstance(value, dict):
         return "{" + ", ".join(f"{k} = {_render_value(v)}" for k, v in value.items()) + "}"
-    return '"' + str(value).replace('"', '\\"') + '"'
+    return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 def _render_toml(config: Config) -> str:

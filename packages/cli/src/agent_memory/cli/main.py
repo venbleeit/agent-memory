@@ -207,6 +207,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     dream_status.set_defaults(handler=_dream_status)
 
+    scanner = subparsers.add_parser(
+        "scan-secrets", help="report secrets already in the store; changes nothing"
+    )
+    scanner.set_defaults(handler=_scan_secrets)
+
     exporter = subparsers.add_parser("export", help="export the whole store")
     exporter.add_argument("--out", default=None)
     exporter.add_argument("--no-archive", action="store_true")
@@ -541,6 +546,13 @@ def _feedback(store: Store, args: argparse.Namespace) -> dict[str, object]:
 def _rebuild(store: Store, args: argparse.Namespace) -> dict[str, object]:
     report = store.rebuild_index()
     return {"reindexed": len(report.reindexed), "dangling_links": len(report.dangling_links)}
+
+
+def _scan_secrets(store: Store, args: argparse.Namespace) -> dict[str, object]:
+    from agent_memory.core import redaction
+
+    hits = redaction.scan(store)
+    return {"store": str(store.root), "count": len(hits), "hits": [hit.as_dict() for hit in hits]}
 
 
 def _inspect(store: Store, args: argparse.Namespace) -> dict[str, object]:

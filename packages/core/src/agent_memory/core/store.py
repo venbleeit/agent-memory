@@ -26,6 +26,7 @@ from .indexer import Indexer, IndexReport
 from .locking import store_lock
 from .paths import StoreLayout
 from .record import MemoryRecord
+from .redaction import Redactor
 from .schema import MODE_ADD_ONLY, MemorySchema, SchemaRegistry
 from .search_index import SearchIndex
 from .sessions import Message, parse_pointer, resolve
@@ -256,6 +257,7 @@ class Store:
             fields=dict(placed.fields),
             path=target,
         )
+        Redactor(self.config.redaction).redact_record(candidate)
         if existing is not None and supersedes is None:
             self._enforce_update_only(existing, candidate)
         record_module.validate(candidate, self.config, schema)
@@ -556,6 +558,7 @@ class Store:
     def _validate_write(self, record: MemoryRecord, *, replace_links: bool = False) -> None:
         if record.path is None or self.layout.type_of(record.path) != record.type:
             raise ValidationError([FieldError("path", "memory must belong to this store")])
+        Redactor(self.config.redaction).redact_record(record)
         record_module.validate(record, self.config, self.schemas.get(record.type))
         record_module.canonicalise_dates(record)
         self._validate_links(record, self.find(record.name), replace_links=replace_links)
