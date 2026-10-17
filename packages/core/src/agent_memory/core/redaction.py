@@ -36,7 +36,10 @@ CATALOGUE: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("slack-token", re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}")),
     ("google-api-key", re.compile(r"\bAIza[0-9A-Za-z_-]{35}")),
     ("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}")),
-    ("bearer", re.compile(r"(?i)\bbearer\s+(?P<secret>[A-Za-z0-9._~+/=-]{6,})")),
+    (
+        "bearer",
+        re.compile(r"(?i)\bbearer\s+(?P<secret>(?=[A-Za-z._~+/=-]*\d)[A-Za-z0-9._~+/=-]{6,})"),
+    ),
     ("url-credential", re.compile(r"(?i)\b[a-z][a-z0-9+.-]*://[^\s:/@]+:(?P<secret>[^\s@/]+)@")),
     (
         "secret-assignment",

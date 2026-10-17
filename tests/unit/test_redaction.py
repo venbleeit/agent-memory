@@ -77,7 +77,10 @@ def test_redaction_is_idempotent_and_finds_nothing_in_its_own_output():
 
 
 def test_plain_prose_is_untouched():
-    text = "The token bucket refills every second; the password policy needs 12 characters."
+    text = (
+        "The token bucket refills every second; the password policy needs 12 characters. "
+        "The approval GUID is the bearer credential, so treat the bearer capability carefully."
+    )
 
     assert _redactor().redact(text) == text
 
