@@ -27,7 +27,7 @@ from agent_memory.core.config import (
 from agent_memory.core.store import Store
 
 from . import capture as capture_module
-from . import moments, muse_session, transcript
+from . import moments, muse_session, subagent, transcript, windows_bridge
 
 EXIT_OK = 0
 LOG_FILENAME = "hooks.log"
@@ -52,9 +52,11 @@ STORE_FLAG = "--store"
 MUSE_DATA_HOME_FLAG = "--muse-data-home"
 MUSE_SETTINGS_FLAG = "--muse-settings"
 EXECUTOR_BINARY = "mem"
+AUTO_DREAM_FLAG = "--auto-dream"
 PRINTED_KEYS = (CLAUDE_OUTPUT_KEY, CLAUDE_CONTEXT_KEY)
 
 Launcher = Callable[[Store, str, str], bool]
+DreamLauncher = Callable[[Store, str], object]
 
 
 class _Timeout(Exception):
@@ -72,6 +74,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.add_argument(STORE_FLAG, default="")
         parser.add_argument(MUSE_DATA_HOME_FLAG, default="")
         parser.add_argument(MUSE_SETTINGS_FLAG, default="")
+        parser.add_argument(windows_bridge.PATH_DIALECT_FLAG, default="")
         args = parser.parse_args(argv or ())
         event = normalize_event(json.loads(sys.stdin.read() or "{}"), args.host)
         if args.store:
@@ -87,6 +90,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             agent=str(event.get("agent") or "hook"),
         )
         _arm(store.config.write.hook_timeout_seconds)
+        if args.path_dialect == windows_bridge.DIALECT:
+            event = windows_bridge.translate_event(event, store.config)
         response = handle(store, event)
         if any(key in response for key in PRINTED_KEYS):
             print(json.dumps(response))
@@ -98,15 +103,27 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def handle(
-    store: Store, event: dict[str, object], launch: Launcher | None = None
+    store: Store,
+    event: dict[str, object],
+    launch: Launcher | None = None,
+    dream_launch: DreamLauncher | None = None,
 ) -> dict[str, object]:
     host = str(event.get(KEY_HOST) or moments.HOST_CLAUDE_CODE)
     raw_event = str(event.get(KEY_EVENT_CLAUDE) or event.get(KEY_EVENT_GENERIC) or "")
     moment = moments.moment_for(host, raw_event)
     if moment == moments.MOMENT_INJECT:
-        return _inject(store, host)
+        response = _inject(store, host)
+        (dream_launch or _launch_dream)(store, host)
+        return response
     if moment in (moments.MOMENT_PAUSE, moments.MOMENT_EVICT):
-        return _boundary(store, event, host, moment, launch or launch_distill)
+        return _boundary(
+            store,
+            event,
+            host,
+            moment,
+            launch or launch_distill,
+            dream_launch or _launch_dream,
+        )
     return {}
 
 
@@ -132,14 +149,24 @@ def _inject(store: Store, host: str) -> dict[str, object]:
 
 
 def _boundary(
-    store: Store, event: dict[str, object], host: str, moment: str, launch: Launcher
+    store: Store,
+    event: dict[str, object],
+    host: str,
+    moment: str,
+    launch: Launcher,
+    dream_launch: DreamLauncher,
 ) -> dict[str, object]:
     session = str(event.get(KEY_SESSION) or "")
     if not session:
         return {}
-    items = _items(event)
+    if subagent.is_child(event):
+        items = subagent.items(session, event, host)
+        session = subagent.child_session(session, event)
+    else:
+        items = _items(event)
     result = capture_module.capture(store, session, items, source=moment)
     if result.is_empty():
+        dream_launch(store, host)
         return {}
     launched = store.config.write.distill_on_boundary and launch(store, session, host)
     return {
@@ -150,6 +177,12 @@ def _boundary(
         "pointer": result.pointer,
         KEY_DISTILL: DISTILL_LAUNCHED if launched else DISTILL_SKIPPED,
     }
+
+
+def _launch_dream(store: Store, _host: str) -> object:
+    from . import auto_dream
+
+    return auto_dream.launch(store, trigger_source="hook")
 
 
 def launch_distill(store: Store, session: str, host: str) -> bool:
@@ -167,7 +200,7 @@ def launch_distill(store: Store, session: str, host: str) -> bool:
         store.layout.state_dir.mkdir(parents=True, exist_ok=True)
         with (store.layout.state_dir / LOG_FILENAME).open("a", encoding="utf-8") as log:
             subprocess.Popen(
-                [*command, SESSION_FLAG, session, SOURCE_HOST_FLAG, host],
+                [*command, SESSION_FLAG, session, SOURCE_HOST_FLAG, host, AUTO_DREAM_FLAG],
                 env=environment,
                 stdin=subprocess.DEVNULL,
                 stdout=log,
@@ -203,10 +236,7 @@ def _items(event: dict[str, object]) -> list[str]:
         else []
     )
     if host == moments.HOST_MUSE_CODE and found:
-        final = str(event.get("last_assistant_message") or "").strip()
-        rendered = f"assistant: {final}" if final else ""
-        if rendered and rendered not in found:
-            found.append(rendered)
+        return subagent.with_final_answer(found, event)
     return found
 
 

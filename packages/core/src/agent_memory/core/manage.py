@@ -14,9 +14,11 @@ import dataclasses
 import datetime as dt
 import hashlib
 import json
+import os
 import pathlib
 import re
 import subprocess
+import tempfile
 
 from . import reasoning, timestamp
 from . import record as record_module
@@ -97,6 +99,7 @@ class DreamReport:
     decisions: tuple[Decision, ...] = ()
     withheld: tuple[str, ...] = ()
     committed: bool = False
+    dream_id: str = ""
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -108,6 +111,7 @@ class DreamReport:
             "withheld": list(self.withheld),
             "committed": self.committed,
             "path": self.path,
+            "dream_id": self.dream_id,
         }
 
 
@@ -128,7 +132,9 @@ class Manage:
             and sessions_since >= self._config.manage.trigger_min_sessions
         )
 
-    def sleep(self, reasoner: reasoning.Reasoner | None = None) -> DreamReport:
+    def sleep(
+        self, reasoner: reasoning.Reasoner | None = None, *, dream_id: str = ""
+    ) -> DreamReport:
         records = self._store.records()
         hits, reads, last_access = self._usage()
 
@@ -152,6 +158,7 @@ class Manage:
             inspected=len(records),
             decisions=decisions,
             withheld=withheld,
+            dream_id=dream_id,
         )
         report = dataclasses.replace(report, path=str(self._write_report(report)))
         return dataclasses.replace(report, committed=self._commit(report))
@@ -638,11 +645,15 @@ class Manage:
     def _write_report(self, report: DreamReport) -> str:
         folder = self._store.layout.dream_reports
         folder.mkdir(parents=True, exist_ok=True)
-        path = folder / (self._clock.stamp() + REPORT_SUFFIX)
+        filename = f"auto-{report.dream_id}{REPORT_SUFFIX}" if report.dream_id else (
+            self._clock.stamp() + REPORT_SUFFIX
+        )
+        path = folder / filename
         lines = [
             f"# dream report {report.at}",
             "",
             f"inspected: {report.inspected}",
+            f"dream_id: {report.dream_id}" if report.dream_id else "",
             "",
             "## applied",
             "",
@@ -664,7 +675,16 @@ class Manage:
         if report.withheld:
             lines.extend(["", "## withheld (over the cap or refused by the write path)", ""])
             lines.extend(f"- {proposal_id}" for proposal_id in report.withheld)
-        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        rendered = "\n".join(lines) + "\n"
+        with tempfile.NamedTemporaryFile(
+            "w", dir=path.parent, delete=False, encoding="utf-8"
+        ) as temporary:
+            temporary.write(rendered)
+            staged = pathlib.Path(temporary.name)
+        try:
+            os.replace(staged, path)
+        finally:
+            staged.unlink(missing_ok=True)
         return str(path)
 
     def _commit(self, report: DreamReport) -> bool:
@@ -697,12 +717,21 @@ class Manage:
     def _last_sleep(self) -> dt.datetime | None:
         folder = self._store.layout.dream_reports
         reports = sorted(folder.glob("*" + REPORT_SUFFIX)) if folder.exists() else []
-        for path in reversed(reports):
+        found: list[dt.datetime] = []
+        for path in reports:
             try:
-                return dt.datetime.strptime(path.stem, STAMP_FORMAT).replace(tzinfo=dt.UTC)
+                found.append(dt.datetime.strptime(path.stem, STAMP_FORMAT).replace(tzinfo=dt.UTC))
             except ValueError:
-                continue
-        return None
+                try:
+                    heading = path.read_text(encoding="utf-8").splitlines()[0]
+                    found.append(timestamp.parse(heading.removeprefix("# dream report ").strip()))
+                except (OSError, IndexError, ValueError):
+                    continue
+        return max(found) if found else None
+
+    def last_sleep(self) -> dt.datetime | None:
+        """Latest completed report, including stable-id reports from automatic workers."""
+        return self._last_sleep()
 
 
 def _tokens(text: str) -> set[str]:

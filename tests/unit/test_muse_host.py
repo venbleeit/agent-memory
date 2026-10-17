@@ -468,6 +468,121 @@ def test_muse_executor_uses_hook_pinned_settings_and_sibling_auth(tmp_path, monk
     assert observed["auth"] == auth.read_bytes()
 
 
+def test_muse_native_write_stages_only_the_batch_toolkit(tmp_path, monkeypatch):
+    source_config = tmp_path / "source-config"
+    source_settings = source_config / "muse" / "settings.json"
+    source_settings.parent.mkdir(parents=True)
+    source_settings.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "provider": "meta",
+                "model": "muse-spark-1.3",
+                "mcp_servers": {"personal": {"command": "personal-server"}},
+                "hooks": {"Stop": [{"hooks": []}]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    server = hosts.ToolServer(
+        name="memory",
+        command="/venv/bin/python",
+        args=("-m", "agent_memory.mcp.write_session", "/tmp/batch"),
+        tools=("recall", "read", "submit_operations"),
+    )
+    observed = {}
+
+    def run(command, **kwargs):
+        config = pathlib.Path(kwargs["env"]["XDG_CONFIG_HOME"]) / "muse" / "settings.json"
+        prompt = pathlib.Path(command[command.index("--prompt-file") + 1])
+        observed.update(
+            settings=json.loads(config.read_text(encoding="utf-8")),
+            prompt=prompt.read_text(encoding="utf-8"),
+            environment=kwargs["env"],
+            command=command,
+        )
+        stdout = json.dumps({"kind": "run_terminal", "terminal": "completed", "text": "done"})
+        return subprocess.CompletedProcess(command, 0, stdout, "")
+
+    monkeypatch.setattr(hosts.subprocess, "run", run)
+    host = hosts.Host(hosts.HostSpec(name="muse-code", binary="muse", model="", attempts=1))
+    result = host.converse(
+        "batch material",
+        system_prompt="distillation instructions",
+        server=server,
+        environment={"XDG_CONFIG_HOME": str(source_config), "AGENT_MEMORY_EXECUTOR": "1"},
+    )
+
+    assert result.ok
+    assert observed["prompt"] == "distillation instructions\n\nbatch material"
+    assert observed["settings"] == {
+        "schema_version": 1,
+        "provider": "meta",
+        "model": "muse-spark-1.3",
+        "mcp_servers": {
+            "memory": {
+                "transport": "stdio",
+                "command": server.command,
+                "args": list(server.args),
+                "enabled": True,
+                "mode": "required",
+            }
+        },
+    }
+    assert observed["environment"]["AGENT_MEMORY_EXECUTOR"] == "1"
+    assert observed["environment"]["TMPDIR"] == hosts.MUSE_RUNTIME_TMPDIR
+    override = observed["command"][observed["command"].index("-c") + 1]
+    assert json.loads(override.removeprefix("run.toolset=")) == [
+        "mcp__memory__recall",
+        "mcp__memory__read",
+        "mcp__memory__submit_operations",
+    ]
+    assert "--disable-shell" in observed["command"]
+    assert "--disable-web-tools" in observed["command"]
+    assert "--disable-write" in observed["command"]
+    assert observed["command"][observed["command"].index("--max-model-steps") + 1] == "8"
+
+
+def test_muse_native_write_rejects_a_version_without_exact_mcp_tool_selection(monkeypatch):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 2, "", "unexpected argument '-c'")
+
+    monkeypatch.setattr(hosts.subprocess, "run", run)
+    host = hosts.Host(
+        hosts.HostSpec(
+            name="muse-code", binary="muse", attempts=3, retry_backoff_seconds=0
+        )
+    )
+    result = host.converse(
+        "batch",
+        system_prompt="instructions",
+        server=hosts.ToolServer("memory", "python", (), ("recall",)),
+    )
+
+    assert not result.ok
+    assert "require Muse Code 1.4.4 or newer" in result.error
+    assert len(calls) == 1
+
+
+def test_muse_native_write_timeout_is_a_terminal_host_failure(monkeypatch):
+    def run(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, 1)
+
+    monkeypatch.setattr(hosts.subprocess, "run", run)
+    host = hosts.Host(hosts.HostSpec(name="muse-code", binary="muse", attempts=1))
+    result = host.converse(
+        "batch",
+        system_prompt="instructions",
+        server=hosts.ToolServer("memory", "python", (), ("recall",)),
+    )
+
+    assert not result.ok
+    assert result.error == "timeout"
+
+
 @pytest.mark.parametrize("failure", ["error", "timeout"])
 def test_muse_executor_reports_transport_failures(tmp_path, monkeypatch, failure):
     def run(command, **kwargs):

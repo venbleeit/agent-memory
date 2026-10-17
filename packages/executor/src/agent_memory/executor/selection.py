@@ -7,6 +7,8 @@ import dataclasses
 from agent_memory.core.config import (
     REASONER_ENDPOINT,
     REASONER_HOST,
+    TOOL_MODE_AUTO,
+    TOOL_MODE_TEXT,
     ExecutorConfig,
     OperationExecutorConfig,
 )
@@ -30,16 +32,25 @@ def resolve(
     if operation not in OPERATIONS:
         raise ReasonerUnavailableError(f"unsupported memory operation: {operation}")
     policy: OperationExecutorConfig = getattr(config, operation)
+    if operation == MANAGE and policy.tool_mode:
+        raise ReasonerUnavailableError(
+            "manage tool_mode is not supported; Manage review still uses the text protocol"
+        )
     chosen = dataclasses.replace(
         config,
         reasoner=policy.reasoner or config.reasoner,
         host=policy.host or config.host,
+        host_provider=policy.host_provider or config.host_provider,
+        host_allow_data_training=(
+            policy.host_allow_data_training or config.host_allow_data_training
+        ),
         host_model=policy.host_model or config.host_model,
         model=policy.model or config.model,
         endpoint=policy.endpoint or config.endpoint,
         project=policy.project or config.project,
         location=policy.location or config.location,
         timeout_seconds=policy.timeout_seconds or config.timeout_seconds,
+        tool_mode=(policy.tool_mode or config.tool_mode) if operation == WRITE else TOOL_MODE_TEXT,
     )
 
     selected_host = chosen.host
@@ -67,6 +78,12 @@ def resolve(
             chosen = dataclasses.replace(chosen, host_model=model)
     if chosen.reasoner not in (REASONER_HOST, REASONER_ENDPOINT):
         raise ReasonerUnavailableError(f"unsupported reasoner {chosen.reasoner!r} for {operation}")
+    if (
+        operation == WRITE
+        and chosen.reasoner == REASONER_ENDPOINT
+        and chosen.tool_mode != TOOL_MODE_AUTO
+    ):
+        raise ReasonerUnavailableError("write tool_mode applies only to host reasoners")
     if chosen.reasoner == REASONER_HOST and not chosen.host.strip():
         raise ReasonerUnavailableError(f"{operation} host reasoner requires a host")
     return chosen

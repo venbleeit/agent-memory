@@ -67,10 +67,14 @@ version = "0.1.0"
 source = { editable = "packages/executor" }
 dependencies = [
     { name = "agent-memory-core" },
+    { name = "agent-memory-mcp" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "agent-memory-core", editable = "packages/core" }]
+requires-dist = [
+    { name = "agent-memory-core", editable = "packages/core" },
+    { name = "agent-memory-mcp", editable = "packages/mcp" },
+]
 
 [[package]]
 name = "agent-memory-harness"

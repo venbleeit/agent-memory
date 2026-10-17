@@ -5,6 +5,39 @@ eviction, and pause moments. Executor dialects translate a prompt and tool postu
 headless host invocation and normalize only its final answer. Capture, archive, distillation,
 Memory, Recall, and Manage stay host-neutral.
 
+For Write negotiation, Claude Code, Codex, Hermes, and Muse run tools-only: the only tools are the Write
+toolkit's, served by the per-batch MCP adapter ([Write negotiation](write-negotiation.md)); the
+host's built-in tools, user configuration, rules and native memory are off. Claude and Codex
+replace their system instructions; Hermes and Muse put the same ordered material in one prompt file.
+Claude's bare mode stays unused because it drops OAuth and would break zero-key install.
+
+Muse native Write is the automatic Write posture. Muse 1.4.4 added exact MCP selection through
+`run.toolset`; native mode supplies that selection as a one-run override and stages one required
+server in the already-isolated Muse settings. Older CLIs fail with a version-specific error in
+the same attempted process rather than silently changing transport. An explicit
+`tool_mode = "text"` retains the compatibility protocol. Muse/OpenRouter namespace calls pass
+through a per-run loopback compatibility bridge before the existing pproxy: it flattens only the
+model request's tool schema, passes authentication through, and leaves Agent execution and MCP
+dispatch with Muse. A run is limited to eight model steps and fails closed without an accepted
+submission.
+
+Hermes native Write uses a fresh profile below the active Hermes data root per batch and a
+collision-free dynamic MCP toolset named `agent-memory-write`. Its staged config contains only that stdio server and
+whitelists `recall`, `read`, and `submit_operations`; resources and prompts are disabled. The
+provider is explicit and independent of the model, so `openrouter` consumes
+`OPENROUTER_API_KEY` directly and does not construct or mint Vertex credentials. Hermes Agent
+0.22.2 is the tested minimum. Contributor-tier models additionally require the explicit
+`host_allow_data_training` opt-in. Its compatibility text protocol remains available only when
+selected explicitly.
+
+Authenticated validation on 2026-10-17 used Hermes Agent 0.22.2, OpenRouter, and
+`meta/muse-spark-1.3-contributor`. Four isolated runs completed New,
+Recall → Read → Supersede, Skip, and an invalid Read whose error returned to the same Agent before
+an accepted Skip. They made 9 Memory tool calls and took 47.767 s, 31.967 s, 31.280 s, and
+28.321 s respectively. A paired New sample took 44.102 s in native mode versus 22.525 s through
+the text compatibility protocol; both happened to use one Host process because the text model
+submitted immediately. This sample establishes behavior, not a native speed advantage.
+
 Write and Manage have independent Store-level reasoner policies. Explicit CLI choices override
 the operation policy, which overrides the legacy executor policy. Without an operation policy,
 automatic Write uses the host that produced the source session while Manage uses the legacy
@@ -16,6 +49,23 @@ transport, host-process, and response-shape failures are attributed to that oper
 the attempt without selecting another host or endpoint. Write retains the unsettled archive
 backlog, and every accepted memory continues to cite the original source session. Headless
 reasoner sessions carry the executor marker so their lifecycle hooks remain inert.
+
+Automatic Manage deliberately uses the Store's configured Manage reasoner, not the lifecycle
+source Host. The selected reasoner kind, Host, and model are recorded in the claim and reported by
+the worker; failure never falls back to another transport. On a fresh Host-backed Store, the first
+successful Host setup also supplies the default Manage policy. Explicit operation policies and
+legacy endpoint configuration are preserved.
+
+A subagent stop is a boundary for a child session. The child transcript is archived as its own
+session whose identity names the parent and whose first line records the parent and agent type,
+then distilled like any session; the parent archive stays the root conversation only. Children
+of the executor's own sessions stay inert under the executor marker.
+
+A Windows host reaches the WSL install through a bridge rather than a native port, so one
+operating system serializes every writer. Setup writes exec-form hooks into the Windows
+settings that run the WSL hook binary through the WSL launcher, and renders the skill and
+optional MCP entry with the same bridged command. The hook translates Windows drive paths in
+the payload to their WSL mount before reading a transcript.
 
 `muse-code` is the canonical Muse Code identity and `muse` is only a setup alias and binary
 name. Muse lifecycle events use the existing moments, and only root-session material enters the

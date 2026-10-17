@@ -17,10 +17,13 @@ from __future__ import annotations
 import dataclasses
 import json
 from collections.abc import Sequence
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from . import prompts
 from .record import MemoryRecord
+
+if TYPE_CHECKING:
+    from .toolkit import WriteToolkit
 
 VERDICT_ACCEPT = "accept"
 VERDICT_REJECT = "reject"
@@ -36,6 +39,15 @@ FIELD_PROVENANCE = "provenance"
 
 class Reasoner(Protocol):
     def __call__(self, prompt: str) -> str: ...
+
+
+@runtime_checkable
+class ToolReasoner(Protocol):
+    """A standard tool-use agent: it calls the toolkit until it decides it is done."""
+
+    def __call__(self, prompt: str) -> str: ...
+
+    def converse(self, instructions: str, material: str, toolkit: WriteToolkit) -> None: ...
 
 
 class Draft(Protocol):

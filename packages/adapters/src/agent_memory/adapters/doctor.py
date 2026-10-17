@@ -10,10 +10,10 @@ import subprocess
 import tempfile
 import tomllib
 
-from agent_memory.core import prompts
 from agent_memory.core.store import Store
 
 from . import moments, openrouter, setup
+from .windows_bridge import WindowsBridge
 
 READY = "READY"
 FAILED = "FAILED"
@@ -63,6 +63,7 @@ def run(
     mcp: bool = False,
     live: bool = True,
     environment: dict[str, str] | None = None,
+    bridge: WindowsBridge | None = None,
 ) -> Report:
     host = setup.canonical_host(host)
     target = settings_path or setup.default_settings_path(host, environment)
@@ -78,7 +79,8 @@ def run(
     if configured is not None:
         checks.extend(_hook_checks(configured, host, store.root, target))
     skill = setup.skill_path(host, target)
-    skill_ok = skill.is_file() and skill.read_text(encoding="utf-8") == prompts.skill()
+    expected_skill = setup.skill_text(store.root, bridge)
+    skill_ok = skill.is_file() and skill.read_text(encoding="utf-8") == expected_skill
     checks.append(
         Check(
             "SKILL_OK" if skill_ok else "SKILL_INVALID",

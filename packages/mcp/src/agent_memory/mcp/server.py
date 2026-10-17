@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TextIO
 
 from agent_memory.core import observation
@@ -24,13 +24,23 @@ ERROR_METHOD_NOT_FOUND = -32601
 ERROR_INVALID_PARAMS = -32602
 
 
+Catalogue = Callable[[], list[dict[str, object]]]
+Call = Callable[[str, dict[str, object]], dict[str, object]]
+
+
 def handle(store: Store, request: dict[str, object]) -> dict[str, object] | None:
+    return respond(request, tools.catalogue, lambda name, arguments: _call(store, name, arguments))
+
+
+def respond(
+    request: dict[str, object], catalogue: Catalogue, call: Call
+) -> dict[str, object] | None:
     method = str(request.get("method") or "")
     request_id = request.get("id")
     if request_id is None:
         return None
     try:
-        result = _route(store, method, request.get("params") or {})
+        result = _route(method, request.get("params") or {}, catalogue, call)
     except MemoryStoreError as error:
         return _error(request_id, ERROR_INVALID_PARAMS, error.as_dict())
     except KeyError:
@@ -39,10 +49,18 @@ def handle(store: Store, request: dict[str, object]) -> dict[str, object] | None
 
 
 def serve(store: Store, stream_in: TextIO, stream_out: TextIO) -> None:
+    serve_lines(stream_in, stream_out, lambda request: handle(store, request))
+
+
+def serve_lines(
+    stream_in: TextIO,
+    stream_out: TextIO,
+    answer: Callable[[dict[str, object]], dict[str, object] | None],
+) -> None:
     for line in stream_in:
         if not line.strip():
             continue
-        response = handle(store, json.loads(line))
+        response = answer(json.loads(line))
         if response is None:
             continue
         stream_out.write(json.dumps(response) + "\n")
@@ -55,7 +73,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-def _route(store: Store, method: str, params: object) -> dict[str, object]:
+def _route(method: str, params: object, catalogue: Catalogue, call: Call) -> dict[str, object]:
     arguments = params if isinstance(params, dict) else {}
     if method == METHOD_INITIALIZE:
         return {
@@ -64,20 +82,23 @@ def _route(store: Store, method: str, params: object) -> dict[str, object]:
             "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
         }
     if method == METHOD_LIST:
-        return {"tools": tools.catalogue()}
+        return {"tools": catalogue()}
     if method == METHOD_CALL:
         name = str(arguments.get("name") or "")
         payload = arguments.get("arguments")
-        tool_arguments = payload if isinstance(payload, dict) else {}
-        observation.emit("mcp_tool_call", tool=name, arguments=tool_arguments)
-        result = tools.dispatch(store, name, tool_arguments)
-        observation.emit("mcp_tool_return", tool=name)
-        return {
-            "content": [{"type": "text", "text": json.dumps(result, sort_keys=True)}],
-            "structuredContent": result,
-            "isError": False,
-        }
+        return call(name, payload if isinstance(payload, dict) else {})
     raise KeyError(method)
+
+
+def _call(store: Store, name: str, arguments: dict[str, object]) -> dict[str, object]:
+    observation.emit("mcp_tool_call", tool=name, arguments=arguments)
+    result = tools.dispatch(store, name, arguments)
+    observation.emit("mcp_tool_return", tool=name)
+    return {
+        "content": [{"type": "text", "text": json.dumps(result, sort_keys=True)}],
+        "structuredContent": result,
+        "isError": False,
+    }
 
 
 def _error(request_id: object, code: int, data: dict[str, object]) -> dict[str, object]:

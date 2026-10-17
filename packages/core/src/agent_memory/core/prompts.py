@@ -12,6 +12,7 @@ the specifics compressed out, which index a conversation without preserving it.
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Sequence
 
 MEMORY_KEEPER = """You are keeping a long-term memory store on behalf of this person.
@@ -174,7 +175,7 @@ def injected_index(index: str) -> str:
     return INJECTED_INDEX.format(index=index.strip())
 
 
-DISTILL_SHEET = """You are filling in a long-term memory store from one conversation.
+DISTILL_INSTRUCTIONS = """You are filling in a long-term memory store from one conversation.
 
 {slot_instruction}
 
@@ -195,16 +196,14 @@ fact itself has changed. Anything else is new. Group fields are chosen from the 
 groups listed per type; add create_group when a new group is genuinely needed.
 
 ## Types
-{slot_table}
+{slot_table}"""
 
-{sheet}
-
-{conversation}
-
-Reply with one JSON object per line and nothing else. Each object carries "type", "fields",
+DISTILL_LINES = (
+    """Reply with one JSON object per line and nothing else. Each object carries "type", "fields",
 "abstract", "body" (markdown, the specifics in full), "op" (new, update, supersede, skip),
 "handle" for update and supersede, "valid_from" when the fact holds from a date,
 "create_group" when needed, and "provenance" as a list of message ranges."""
+)
 
 REPAIR = """Some of the memories you wrote were not accepted. Each line below shows the
 operation and why it was refused. Reply with corrected versions of those lines only, one
@@ -241,14 +240,41 @@ EVENT_LANE = """Facts, decisions and preferences are the knowledge; events are t
 what happened, and each conversation yields at least one event."""
 
 
-def distill_sheet(
+TOOL_GUIDE = """## Tools
+
+Look before you write: recall searches current memory by the words a memory would contain,
+and read opens one memory in full. A handle on the reconcile sheet or shown by a tool may be
+named in update and supersede. When you know what this conversation adds, call
+submit_operations with every operation. Each carries "op" (new, update, supersede, skip),
+"type", "fields", "abstract", "body" (markdown, the specifics in full), "handle" for update
+and supersede, "valid_from" when the fact holds from a date, "create_group" when needed, and
+"provenance" as a list of message ranges. A refused submission lists its reasons; submit the
+corrected full list. Use op skip when the conversation holds nothing worth keeping."""
+
+
+@dataclasses.dataclass(frozen=True)
+class Brief:
+    """One batch's prompt in two parts: instructions that hold across batches, and material."""
+
+    instructions: str
+    material: str
+
+    def tool_system(self) -> str:
+        return "\n\n".join((self.instructions, TOOL_GUIDE))
+
+    def text_protocol(self) -> str:
+        return "\n\n".join((self.instructions, self.material, DISTILL_LINES))
+
+
+def distill_brief(
     slots: str, sheet: str, conversation: str, slot_table: bool = True, event_lane: bool = True
-) -> str:
+) -> Brief:
     instruction = SLOT_INSTRUCTION if slot_table else FREE_INSTRUCTION
     if event_lane:
         instruction += " " + EVENT_LANE
-    return DISTILL_SHEET.format(
-        slot_instruction=instruction, slot_table=slots, sheet=sheet, conversation=conversation
+    return Brief(
+        instructions=DISTILL_INSTRUCTIONS.format(slot_instruction=instruction, slot_table=slots),
+        material="\n\n".join((sheet, conversation)),
     )
 
 
@@ -265,7 +291,7 @@ description: Read and write the shared long-term memory store. Use before starti
 # agent-memory
 
 A shared memory store on disk. Markdown files are the truth; `mem` is the way in and out.
-
+{invocation}
 ## Host setup
 
 Use the deterministic installer for the active host: `mem setup --host claude-code`,
@@ -339,9 +365,16 @@ Core validates paths, relationships, time intervals, and provenance under a writ
 """
 
 
-def skill() -> str:
+BRIDGED_INVOCATION = """
+On this host the mem CLI runs inside WSL. Each `mem` command below runs as
+`{invocation}` followed by the same arguments.
+"""
+
+
+def skill(invocation: str = "") -> str:
     """The skill file is rendered from here, so its discipline is the one the executor gets."""
-    return SKILL.format(discipline=WRITE_DISCIPLINE)
+    bridged = BRIDGED_INVOCATION.format(invocation=invocation) if invocation else ""
+    return SKILL.format(discipline=WRITE_DISCIPLINE, invocation=bridged)
 
 
 TOOL_RULES = """## Looking before writing

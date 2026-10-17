@@ -56,6 +56,76 @@ def test_fresh_and_repeated_setup_share_one_idempotent_pipeline(tmp_path, monkey
         assert str(store.root) in rendered
 
 
+def test_successful_host_setup_sets_the_default_manual_sleep_host(tmp_path, monkeypatch):
+    target = tmp_path / "codex" / "hooks.json"
+    store = Store(tmp_path / "store")
+    monkeypatch.setattr(setup, "probe", lambda selected: f"{selected} 1.0")
+
+    report = host_setup.run(store, moments.HOST_CODEX, settings_path=target)
+
+    assert report["status"] == doctor.READY
+    configured = Store(store.root).config.executor
+    assert configured.host == moments.HOST_CLAUDE_CODE
+    assert configured.manage == OperationExecutorConfig(
+        reasoner="host",
+        host=moments.HOST_CODEX,
+    )
+
+
+def test_host_setup_does_not_replace_an_explicit_endpoint_reasoner(tmp_path, monkeypatch):
+    target = tmp_path / "codex" / "hooks.json"
+    store = Store(tmp_path / "store")
+    store.init()
+    store.config.executor.reasoner = "endpoint"
+    store.config.executor.host = moments.HOST_CLAUDE_CODE
+    store.config.save(store.root)
+    monkeypatch.setattr(setup, "probe", lambda selected: f"{selected} 1.0")
+
+    host_setup.run(store, moments.HOST_CODEX, settings_path=target)
+
+    configured = Store(store.root).config.executor
+    assert configured.reasoner == "endpoint"
+    assert configured.host == moments.HOST_CLAUDE_CODE
+
+
+def test_host_setup_preserves_an_explicit_manage_policy(tmp_path, monkeypatch):
+    target = tmp_path / "codex" / "hooks.json"
+    store = Store(tmp_path / "store")
+    store.init()
+    store.config.executor.manage = OperationExecutorConfig(
+        reasoner="endpoint",
+        endpoint="https://manage.example/v1",
+    )
+    store.config.save(store.root)
+    monkeypatch.setattr(setup, "probe", lambda selected: f"{selected} 1.0")
+
+    host_setup.run(store, moments.HOST_CODEX, settings_path=target)
+
+    configured = Store(store.root).config.executor.manage
+    assert configured.reasoner == "endpoint"
+    assert configured.endpoint == "https://manage.example/v1"
+
+
+def test_failed_host_setup_does_not_persist_a_seeded_manage_policy(tmp_path, monkeypatch):
+    target = tmp_path / "codex" / "hooks.json"
+    store = Store(tmp_path / "store")
+    monkeypatch.setattr(setup, "probe", lambda selected: f"{selected} 1.0")
+    monkeypatch.setattr(
+        doctor,
+        "_live_reasoner_check",
+        lambda _store, _host, operation: doctor.Check(
+            f"{operation.upper()}_REASONER_LIVE_FAILED",
+            False,
+            "fixture failure",
+        ),
+    )
+
+    report = host_setup.run(store, moments.HOST_CODEX, settings_path=target)
+
+    assert report["status"] == doctor.FAILED
+    assert Store(store.root).config.executor.manage == OperationExecutorConfig()
+
+
 @pytest.mark.parametrize("host", HOSTS)
 def test_probe_classifies_a_missing_host_binary(monkeypatch, host):
     monkeypatch.setattr(setup.shutil, "which", lambda _binary: None)

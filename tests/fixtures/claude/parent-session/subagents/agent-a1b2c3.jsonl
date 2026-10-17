@@ -1,0 +1,3 @@
+{"parentUuid":null,"isSidechain":true,"agentId":"a1b2c3","type":"user","sessionId":"parent-session","message":{"role":"user","content":"You are the FRONTEND implementer. Fix the login redirect loop."}}
+{"parentUuid":"u1","isSidechain":true,"agentId":"a1b2c3","type":"attachment","sessionId":"parent-session"}
+{"parentUuid":"u2","isSidechain":true,"agentId":"a1b2c3","type":"assistant","sessionId":"parent-session","message":{"role":"assistant","content":[{"type":"text","text":"The redirect loop came from the auth guard reading a stale token cookie; cleared it on logout."}]}}

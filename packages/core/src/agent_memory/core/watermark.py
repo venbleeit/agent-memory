@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import pathlib
+import tempfile
 
+from . import sessions
 from .clock import Clock
 from .paths import StoreLayout
 
@@ -75,17 +78,23 @@ class Watermark:
         session = mark.session
         path = self._path(session)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(
-                {
-                    KEY_CONSUMED: mark.consumed,
-                    KEY_UPDATED_AT: mark.updated_at,
-                    KEY_SOURCE: mark.source,
-                    KEY_DISTILLED: mark.distilled,
-                }
-            ),
-            encoding="utf-8",
+        rendered = json.dumps(
+            {
+                KEY_CONSUMED: mark.consumed,
+                KEY_UPDATED_AT: mark.updated_at,
+                KEY_SOURCE: mark.source,
+                KEY_DISTILLED: mark.distilled,
+            }
         )
+        with tempfile.NamedTemporaryFile(
+            "w", dir=path.parent, delete=False, encoding="utf-8"
+        ) as tmp:
+            tmp.write(rendered)
+            staged = pathlib.Path(tmp.name)
+        try:
+            os.replace(staged, path)
+        finally:
+            staged.unlink(missing_ok=True)
         return mark
 
     def sessions(self) -> list[str]:
@@ -94,4 +103,4 @@ class Watermark:
         return sorted(path.stem for path in self._layout.watermarks.glob("*" + MARK_SUFFIX))
 
     def _path(self, session: str) -> pathlib.Path:
-        return self._layout.watermarks / (session + MARK_SUFFIX)
+        return self._layout.watermarks / (sessions.require_safe(session) + MARK_SUFFIX)

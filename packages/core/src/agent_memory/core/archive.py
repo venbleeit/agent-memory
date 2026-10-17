@@ -8,6 +8,7 @@ import pathlib
 from . import sessions
 from .clock import Clock
 from .paths import StoreLayout
+from .redaction import Redactor
 
 PROVENANCE_SUFFIX = ".md"
 SESSION_SUFFIX = sessions.SESSION_SUFFIX
@@ -19,6 +20,7 @@ class Archive:
         self._clock = clock or Clock()
 
     def append_provenance(self, name: str, excerpt: str, source: str = "") -> pathlib.Path:
+        excerpt = Redactor(self._layout.config.redaction).redact(excerpt)
         folder = self._layout.provenance / name
         folder.mkdir(parents=True, exist_ok=True)
         digest = hashlib.sha256(excerpt.encode("utf-8")).hexdigest()

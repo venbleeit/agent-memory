@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import pathlib
 
+from agent_memory.core.config import REASONER_HOST, OperationExecutorConfig
 from agent_memory.core.errors import FieldError, ValidationError
 from agent_memory.core.store import Store
 
 from . import doctor, moments, openrouter, setup
+from .windows_bridge import WindowsBridge
 
 
 def run(
@@ -19,6 +21,7 @@ def run(
     model: str | None = None,
     mcp: bool = False,
     live: bool = True,
+    bridge: WindowsBridge | None = None,
 ) -> dict[str, object]:
     """Detect -> validate -> Store -> merge -> hooks/skill/MCP -> provider -> preflight."""
     host = setup.canonical_host(host)
@@ -43,11 +46,22 @@ def run(
             provider=provider,
             model=model,
             mcp=mcp,
+            bridge=bridge,
         )
     except ValidationError as error:
         mcp_failed = any(item.field == "mcp" for item in error.errors)
         code = "MCP_INVALID" if mcp_failed else "HOST_CONFIG_INVALID"
         return _failed(host, store, target, code, str(error), version=version)
+    seeded_manage = (
+        store.config.executor.reasoner == REASONER_HOST
+        and store.config.executor.manage == OperationExecutorConfig()
+    )
+    if seeded_manage:
+        store.config.executor.manage = OperationExecutorConfig(
+            reasoner=REASONER_HOST,
+            host=host,
+        )
+        store.config.save(store.root)
     provider_status: dict[str, object] | None = None
     if provider == openrouter.PROVIDER:
         credential = openrouter.detect_credential()
@@ -73,7 +87,11 @@ def run(
         model=model,
         mcp=mcp,
         live=live,
+        bridge=bridge,
     )
+    if seeded_manage and report.status != doctor.READY:
+        store.config.executor.manage = OperationExecutorConfig()
+        store.config.save(store.root)
     payload = report.as_dict()
     payload.update(
         {
