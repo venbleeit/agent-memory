@@ -27,7 +27,7 @@ from agent_memory.core.config import (
 from agent_memory.core.store import Store
 
 from . import capture as capture_module
-from . import moments, muse_session, transcript
+from . import moments, muse_session, subagent, transcript
 
 EXIT_OK = 0
 LOG_FILENAME = "hooks.log"
@@ -156,7 +156,11 @@ def _boundary(
     session = str(event.get(KEY_SESSION) or "")
     if not session:
         return {}
-    items = _items(event)
+    if subagent.is_child(event):
+        items = subagent.items(session, event, host)
+        session = subagent.child_session(session, event)
+    else:
+        items = _items(event)
     result = capture_module.capture(store, session, items, source=moment)
     if result.is_empty():
         dream_launch(store, host)
@@ -229,10 +233,7 @@ def _items(event: dict[str, object]) -> list[str]:
         else []
     )
     if host == moments.HOST_MUSE_CODE and found:
-        final = str(event.get("last_assistant_message") or "").strip()
-        rendered = f"assistant: {final}" if final else ""
-        if rendered and rendered not in found:
-            found.append(rendered)
+        return subagent.with_final_answer(found, event)
     return found
 
 

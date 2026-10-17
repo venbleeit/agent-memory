@@ -16,6 +16,7 @@ DIALECTS: dict[str, dict[str, str]] = {
         "SessionStart": MOMENT_INJECT,
         "Stop": MOMENT_PAUSE,
         "SessionEnd": MOMENT_PAUSE,
+        "SubagentStop": MOMENT_PAUSE,
         "PreCompact": MOMENT_EVICT,
     },
     HOST_CODEX: {

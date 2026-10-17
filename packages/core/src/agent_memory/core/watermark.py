@@ -12,6 +12,7 @@ import os
 import pathlib
 import tempfile
 
+from . import sessions
 from .clock import Clock
 from .paths import StoreLayout
 
@@ -102,4 +103,4 @@ class Watermark:
         return sorted(path.stem for path in self._layout.watermarks.glob("*" + MARK_SUFFIX))
 
     def _path(self, session: str) -> pathlib.Path:
-        return self._layout.watermarks / (session + MARK_SUFFIX)
+        return self._layout.watermarks / (sessions.require_safe(session) + MARK_SUFFIX)

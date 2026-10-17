@@ -87,9 +87,14 @@ def _safe_session(session: str) -> bool:
     )
 
 
-def session_path(layout: StoreLayout, session: str) -> pathlib.Path:
+def require_safe(session: str) -> str:
     if not _safe_session(session):
         raise ValidationError([FieldError("pointer", "invalid session identifier")])
+    return session
+
+
+def session_path(layout: StoreLayout, session: str) -> pathlib.Path:
+    require_safe(session)
     path = layout.sessions / f"{session}{SESSION_SUFFIX}"
     # Neither the sessions directory nor the file may redirect outside this store.
     expected = layout.root.resolve() / ARCHIVE_DIRNAME / SESSIONS_DIRNAME / path.name
